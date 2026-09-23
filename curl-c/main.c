@@ -7,30 +7,27 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 typedef struct __req {
+	const char *host;
+	const char *path;
 	char *msg;
-	int len;
+	int msg_len;
 } req_t;
 
 // write_request writes to the *req struct and returns 0
 // if successful, 1 otherwise
-int write_request(req_t *req, const char *host, const char *path) {
+int write_request(req_t *req, size_t cap) {
 	const char *fmt = "GET %s HTTP/1.1\r\n"
 					  "Host: %s\r\n"
 					  "Connection: close\r\n"
 					  "\r\n";
 
-	int len = snprintf(NULL, 0, fmt, path, host);
-	if (len < 0)
-		return 1;
-	int n = snprintf(req->msg, len + 1, fmt, path, host);
-	if (n != len) {
-		return 1;
-	}
-	req->msg[req->len] = '\0';
-	req->len = len;
-
+	int len = snprintf(req->msg, cap, fmt, req->path, req->host);
+	if (len < 0 || (size_t)len >= cap)
+		return 1; // error or truncated
+	req->msg_len = len;
 	return 0;
 }
 
@@ -66,6 +63,8 @@ int main(int argc, char *argv[]) {
 
 	int rc = connect(s, res->ai_addr, res->ai_addrlen);
 	if (rc != 0) {
+		freeaddrinfo(res);
+		close(s);
 		perror("connect");
 		return 2;
 	}
@@ -73,8 +72,13 @@ int main(int argc, char *argv[]) {
 
 	req_t req;
 	memset(&req, 0, sizeof(req_t));
-	rc = write_request(&req, url, "/");
-	int bytes_sent = send(s, req.msg, req.len, 0);
+	char msg[1024] = {0};
+	req.msg = msg;
+	req.host = url;
+	req.path = "/";
+
+	rc = write_request(&req, 1024);
+	int bytes_sent = send(s, req.msg, req.msg_len, 0);
 	if (bytes_sent == -1) {
 		freeaddrinfo(res); // free the linked list
 		perror("send");
@@ -84,6 +88,8 @@ int main(int argc, char *argv[]) {
 
 	// TODO: add null terminator to buf
 	char buf[1024];
+	// TODO: need to loop through since recv might not get the whole response in
+	// one call
 	int n = recv(s, buf, sizeof buf - 1, 0);
 	if (n == -1) {
 		perror("recv");
@@ -97,6 +103,7 @@ int main(int argc, char *argv[]) {
 	puts(buf);
 
 	shutdown(s, SHUT_RDWR);
+	close(s);
 	freeaddrinfo(res); // free the linked list
 
 	return EXIT_SUCCESS;
