@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +25,7 @@ int write_request(req_t *req, size_t cap) {
 					  "Connection: close\r\n"
 					  "\r\n";
 
-	int len = snprintf(req->msg, cap, fmt, req->path, req->host);
+	int32_t len = snprintf(req->msg, cap, fmt, req->path, req->host);
 	if (len < 0 || (size_t)len >= cap)
 		return 1; // error or truncated
 	req->msg_len = len;
