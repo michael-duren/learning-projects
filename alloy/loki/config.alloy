@@ -1,46 +1,62 @@
-local.file_match "local_file" {
-	path_targets = [{"__path__" = "/logs/app.log"}]
+local.file_match "app" {
+	path_targets = [{
+		"__path__"     = "/logs/app.log",
+		"service_name" = "demo-app",
+	}]
 }
 
-// loki.source.file "log_scrape" {
-// 	targets       = local.file_match.local_files.targets
-// 	forward_to    = [loki.process.filter_logs.receiver]
-// 	tail_from_end = true
-// }
-// loki.source.file "logs" {
-// 	targets    = local.file_match.local_file.targets
-// 	forward_to = [loki.echo.out.receiver]
-// }
+loki.source.file "app" {
+	targets    = local.file_match.app.targets
+	forward_to = [loki.process.app.receiver]
+}
 
-loki.process "add_labels" {
-	stage.labels {
-		values = {
-			"level"   = "level",
-			"service" = "status",
+loki.process "app" {
+	// Extract every field the app writes.
+	stage.json {
+		expressions = {
+			timestamp  = "",
+			level      = "",
+			path       = "",
+			status     = "",
+			message    = "",
+			request_id = "",
 		}
 	}
 
-	forward_to = [loki.echo.out.receiver]
+	// Use the event time instead of the read time.
+	stage.timestamp {
+		source = "timestamp"
+		format = "RFC3339Nano"
+	}
+
+	// Low-cardinality fields become stream labels.
+	stage.labels {
+		values = {
+			level  = "",
+			path   = "",
+			status = "",
+		}
+	}
+
+	// High-cardinality fields stay queryable without creating streams.
+	stage.structured_metadata {
+		values = {
+			request_id = "",
+		}
+	}
+
+	// Experiment stages go here.
+
+	forward_to = [
+		loki.write.local.receiver,
+		loki.echo.processed.receiver,
+	]
 }
 
-loki.echo "out" { }
+loki.echo "processed" { }
 
-// loki.process "filter_logs" {
-// 	stage.drop {
-// 		source              = ""
-// 		expression          = ".*Connection closed by authenticating user root"
-// 		drop_counter_reason = "noisy"
-// 	}
-// 	forward_to = [loki.write.grafana_loki.receiver]
-// }
-// 
-// loki.write "grafana_loki" {
-// 	endpoint {
-// 		url = "http://localhost:3100/loki/api/v1/push"
-// 
-// 		// basic_auth {
-// 		//  username = "admin"
-// 		//  password = "admin"
-// 		// }
-// 	}
-// }
+loki.write "local" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}
