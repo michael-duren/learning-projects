@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,49 @@ void parse_port(int argc, char *argv[], char *port) {
 		}
 	}
 }
+
+typedef struct {
+	int success;
+	char *error;
+} result_t;
+
+static void *handle(void *arg) {
+	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
+	long long fd = (long long)arg;
+	result_t *result = malloc(sizeof(result_t));
+	if (result == NULL) {
+		close(fd);
+		return NULL;
+	}
+	ssize_t n = send(fd, res, strlen(res), 0);
+	if (n != (long)strlen(res)) {
+		printf("did not send expected amount\n");
+	}
+	result->success = 1;
+	close(fd);
+	return result;
+}
+
+#define STACK_SIZE 0x100000
+
+int create_thread(int fd) {
+	pthread_t p;
+	pthread_attr_t attr;
+	int rc = pthread_attr_init(&attr);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = pthread_attr_setstacksize(&attr, STACK_SIZE);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = pthread_create(&p, &attr, &handle, (void *)&fd);
+	if (rc != 0) {
+		return rc;
+	}
+	return 0;
+}
+
 void *get_in_addr(struct sockaddr *sa) {
 	if (sa->sa_family == AF_INET) {
 		return &(((struct sockaddr_in *)sa)->sin_addr);
@@ -75,27 +119,23 @@ int main(int argc, char *argv[]) {
 		   servinfo->ai_addr->sa_data);
 	struct sockaddr_storage in_addr;
 	socklen_t in_size = sizeof(in_addr);
+
+	// TODO: need to handle open fds when ctrl+c happens
+	while (1) {
+		int cn = accept(s, (struct sockaddr *)&in_addr, &in_size);
+		if (cn == -1) {
+			perror("accept");
+			puts("couldn't accept connection");
+			close(s);
+			return 2;
+		}
+
+		inet_ntop(in_addr.ss_family, get_in_addr((struct sockaddr *)&in_addr),
+				  addr_str, sizeof addr_str);
+		printf("request from: %s\n", addr_str);
+	}
 	// why is casting necessary ?
-	int cn = accept(s, (struct sockaddr *)&in_addr, &in_size);
-	if (cn == -1) {
-		perror("accept");
-		puts("couldn't accept connection");
-		close(s);
-		return 2;
-	}
-
-	inet_ntop(in_addr.ss_family, get_in_addr((struct sockaddr *)&in_addr),
-			  addr_str, sizeof addr_str);
-	printf("request from: %s\n", addr_str);
-
-	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
-	ssize_t n = send(cn, res, strlen(res), 0);
-	if (n != (long)strlen(res)) {
-		perror("send");
-		return 1;
-	}
-
-	close(cn);
 	close(s);
+
 	return 0;
 }
