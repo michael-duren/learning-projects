@@ -2,8 +2,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
-#include <semaphore.h>
-#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,60 +12,47 @@
 #include <unistd.h>
 
 #define MAX_CONN 10
-static sem_t finished;
-static int socketfd;
-static int curr_fd;
 
-void parse_port(int argc, char *argv[], char *port) {
-	if (argc < 2) {
-		port = "8080";
-	} else {
-		int n;
-		if ((n = atoi(port)) > 65535) {
-			printf("invalid port: %d, falling back to :8080\n", n);
-			port = "8080";
-		} else {
-			port = argv[1];
+const char *parse_port(int argc, char *argv[]) {
+	if (argc == 2) {
+		int n = atoi(argv[1]);
+		if (n > 0 && n <= 65535) {
+			return argv[1];
 		}
+		printf("invalid port: %s, falling back to :8080\n", argv[1]);
 	}
+	return "8080";
 }
 
-static void __shutdown(void) {
-	printf("waiting for response writers to finish\n");
-	sem_wait(&finished);
-	printf("shutting down\n");
-	sem_destroy(&finished);
-}
+// TODO: graceful shutdown
+// static void __shutdown(void) {
+// 	printf("waiting for response writers to finish\n");
+// 	printf("shutting down\n");
+// }
 
-void sig_handler(int signo) {
-	if (signo == SIGINT) {
-		__shutdown();
-	}
-}
-
-typedef struct {
-	int success;
-	char *error;
-} result_t;
+// void sig_handler(int signo) {
+// 	if (signo == SIGINT) {
+// 		__shutdown();
+// 	}
+// }
 
 static void *handle(void *arg) {
-	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
 	long long fd = (long long)arg;
-	result_t *result = malloc(sizeof(result_t));
-	if (result == NULL) {
-		close(fd);
-		return NULL;
+	char buf[4096];
+	ssize_t n = recv(fd, buf, sizeof buf - 1, 0);
+	if (n > 0) {
+		buf[n] = '\0';
+		printf("%s", buf);
 	}
-	ssize_t n = send(fd, res, strlen(res), 0);
+
+	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
+	n = send(fd, res, strlen(res), 0);
 	if (n != (long)strlen(res)) {
 		printf("did not send expected amount\n");
 	}
 
-	result->success = 1;
 	close(fd);
-
-	sem_post(&finished);
-	return result;
+	return NULL;
 }
 
 #define STACK_SIZE 0x100000
@@ -84,7 +70,7 @@ int start_handler(int fd) {
 		perror("pthread_attr_setstacksize");
 		return rc;
 	}
-	rc = pthread_create(&p, &attr, &handle, (void *)&fd);
+	rc = pthread_create(&p, &attr, &handle, (void *)(intptr_t)fd);
 	if (rc != 0) {
 		perror("pthread_create");
 		return rc;
@@ -102,14 +88,15 @@ void *get_in_addr(struct sockaddr *sa) {
 
 int main(int argc, char *argv[]) {
 	// setup server
-	if (signal(SIGINT, sig_handler) == SIG_ERR) {
-		perror("signal");
-		return 1;
-	}
-	char port[8];
+	// TODO: re add
+	// if (signal(SIGINT, sig_handler) == SIG_ERR) {
+	// 	perror("signal");
+	// 	return 1;
+	// }
+
 	char addr_str[INET6_ADDRSTRLEN];
-	parse_port(argc, argv, port);
-	sem_init(&finished, 0, 0);
+
+	const char *port = parse_port(argc, argv);
 
 	int rc;
 	struct addrinfo hints;
@@ -121,7 +108,7 @@ int main(int argc, char *argv[]) {
 	hints.ai_socktype = SOCK_STREAM; // tcp
 	hints.ai_flags = AI_PASSIVE;	 // fill in ip
 
-	if ((rc = getaddrinfo(NULL, "8080", &hints, &servinfo) != 0)) {
+	if ((rc = getaddrinfo(NULL, port, &hints, &servinfo)) != 0) {
 		perror("getaddrinfo");
 		return 2;
 	}
@@ -144,9 +131,10 @@ int main(int argc, char *argv[]) {
 		close(s);
 		return 2;
 	}
+	inet_ntop(servinfo->ai_family, get_in_addr(servinfo->ai_addr), addr_str,
+			  sizeof addr_str);
 
-	printf("listening to incoming connnections at: %s\n",
-		   servinfo->ai_addr->sa_data);
+	printf("listening to incoming connnections at: %s:%s\n", addr_str, port);
 	struct sockaddr_storage in_addr;
 	socklen_t in_size = sizeof(in_addr);
 
@@ -169,7 +157,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	__shutdown();
+	// __shutdown();
 
 	return 0;
 }
