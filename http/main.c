@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -36,17 +37,56 @@ const char *parse_port(int argc, char *argv[]) {
 // 	}
 // }
 
-static void *handle(void *arg) {
-	long long fd = (long long)arg;
-	char buf[4096];
-	ssize_t n = recv(fd, buf, sizeof buf - 1, 0);
-	if (n > 0) {
-		buf[n] = '\0';
-		printf("%s", buf);
+#define MAX_REQ_SIZE (1 << 20)
+
+// caller frees
+char *read_req(int fd) {
+	size_t cap = 4096, total = 0;
+	char *buf = malloc(cap);
+	if (buf == NULL) {
+		return NULL;
 	}
 
+	while (1) {
+		if (total == cap - 1) {
+			if (cap >= MAX_REQ_SIZE)
+				break;
+			char *tmp = realloc(buf, cap * 2);
+			if (tmp == NULL)
+				break;
+			buf = tmp;
+			cap *= 2;
+		}
+
+		ssize_t n = recv(fd, buf + total, cap - 1 - total, 0);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			perror("recv");
+			free(buf);
+			return NULL;
+		}
+		if (n == 0)
+			break;
+
+		total += (size_t)n;
+		buf[total] = '\0';
+
+		if (strstr(buf, "\r\n\r\n"))
+			break;
+	}
+
+	buf[total] = '\0';
+	return buf;
+}
+
+static void *handle(void *arg) {
+	intptr_t fd = (intptr_t)arg;
+	char *req = read_req(fd);
+	printf("%s\n", req);
+
 	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
-	n = send(fd, res, strlen(res), 0);
+	ssize_t n = send(fd, res, strlen(res), 0);
 	if (n != (long)strlen(res)) {
 		printf("did not send expected amount\n");
 	}
