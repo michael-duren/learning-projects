@@ -37,6 +37,7 @@ const char *parse_port(int argc, char *argv[]) {
 // 	}
 // }
 
+// ~ 1MB
 #define MAX_REQ_SIZE (1 << 20)
 
 // caller frees
@@ -80,18 +81,98 @@ char *read_req(int fd) {
 	return buf;
 }
 
-static void *handle(void *arg) {
-	intptr_t fd = (intptr_t)arg;
-	char *req = read_req(fd);
-	printf("%s\n", req);
+#define PACKET_SIZE 4096
 
-	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
-	ssize_t n = send(fd, res, strlen(res), 0);
-	if (n != (long)strlen(res)) {
-		printf("did not send expected amount\n");
+// closes socket descriptor
+int write_res(int sd, const char *res, size_t len) {
+	size_t written = 0;
+	while (written < len) {
+		size_t cap = PACKET_SIZE;
+		if (len < cap) {
+			cap = len;
+		}
+
+		ssize_t sent = send(sd, res + written, cap, 0);
+		written += sent;
+		len -= sent;
+		if (!sent)
+			goto error;
+		if (sent == 0) {
+			goto exit;
+		}
 	}
 
+	goto exit;
+error:
+	close(sd);
+	perror("send");
+	return -1;
+exit:
+	return 0;
+}
+
+typedef struct __req_t {
+	const char *path;
+	const char *method;
+	const char *protocol;
+	const char **headers;
+} req_t;
+
+// GET / HTTP/1.1
+// Host: localhost:8081
+// User-Agent: curl/8.21.0
+// Accept: */*
+static int parse_req(char *req_str, req_t *req) {
+	char *p = req_str;
+	req->method = p;
+	p = strchr(req_str, ' ');
+	if (!p)
+		return -1;
+	*p++ = '\0';
+
+	req->path = p;
+	// end of path
+	p = strchr(p, ' ');
+	if (!p)
+		return -1;
+	*p++ = '\0';
+
+	req->protocol = p;
+	p = strchr(p, '\n');
+	if (!p)
+		return -1;
+	*p = '\0';
+
+	// TODO: parse headers
+
+	return 0;
+}
+
+static void *handle(void *arg) {
+	intptr_t fd = (intptr_t)arg;
+	char *req_str = read_req(fd);
+
+	req_t req;
+	int rc = parse_req(req_str, &req);
+	if (rc != 0) {
+		const char *res = "HTTP/1.1 400 Malformed Request\r\n\r\n\n";
+		rc = write_res(fd, res, strlen(res));
+		if (rc != 0) {
+			puts("unable to send 500 response");
+		}
+		goto clean;
+	}
+
+	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
+	rc = write_res(fd, res, strlen(res));
+	if (rc != 0) {
+		puts("unable to send resonse");
+	}
+	goto clean;
+clean:
+	free(req_str);
 	close(fd);
+	// TODO: need to send a result of the handler thread
 	return NULL;
 }
 
