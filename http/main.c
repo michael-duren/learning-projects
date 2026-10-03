@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -138,7 +139,7 @@ static int parse_req(char *req_str, req_t *req) {
 	*p++ = '\0';
 
 	req->protocol = p;
-	p = strchr(p, '\n');
+	p = strstr(p, "\r\n");
 	if (!p)
 		return -1;
 	*p = '\0';
@@ -147,6 +148,8 @@ static int parse_req(char *req_str, req_t *req) {
 
 	return 0;
 }
+
+#define MAX_PATH 4096
 
 static void *handle(void *arg) {
 	intptr_t fd = (intptr_t)arg;
@@ -162,6 +165,14 @@ static void *handle(void *arg) {
 		}
 		goto clean;
 	}
+	char path[MAX_PATH];
+	path[0] = '.';
+	strcpy(path + 1, req.path);
+	int f = open(path, O_RDONLY);
+	if (f == -1) {
+		const char *res = "HTTP/1.1 404 Not Found\r\n\r\n\n";
+		rc = write_res(fd, res, strlen(res));
+	}
 
 	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
 	rc = write_res(fd, res, strlen(res));
@@ -169,6 +180,7 @@ static void *handle(void *arg) {
 		puts("unable to send resonse");
 	}
 	goto clean;
+
 clean:
 	free(req_str);
 	close(fd);
