@@ -84,8 +84,26 @@ char *read_req(int fd) {
 
 #define PACKET_SIZE 4096
 
+int write_res(int status, char *reason, char *body, char *buf) {
+	int n = snprintf(buf, strlen(buf),
+					 "HTTP/1.1 %d %s\r\n"
+					 "Content-Type: text/plain\r\n"
+					 "Content-Length: %zu\r\n"
+					 "Connection: close\r\n"
+					 "\r\n"
+					 "%s",
+					 status, reason, strlen(body), body);
+
+	if (n < 0 || (size_t)n >= sizeof buf)
+		return -1;
+	return n;
+}
+
 // closes socket descriptor
-int write_res(int sd, const char *res, size_t len) {
+int send_res(int sd, int status, char *reason, char *body, size_t len) {
+	char res[MAX_REQ_SIZE];
+	write_res(status, reason, body, res);
+
 	size_t written = 0;
 	while (written < len) {
 		size_t cap = PACKET_SIZE;
@@ -161,25 +179,40 @@ static void *handle(void *arg) {
 	req_t req;
 	int rc = parse_req(req_str, &req);
 	if (rc != 0) {
-		const char *res = "HTTP/1.1 400 Malformed Request\r\n\r\n\n";
-		rc = write_res(fd, res, strlen(res));
+		rc = send_res(fd, 400, "Malformed Request", NULL, 0);
 		if (rc != 0) {
 			puts("unable to send 500 response");
 		}
 		goto clean;
 	}
 	char path[MAX_PATH];
-	path[0] = '.';
-	strcpy(path + 1, req.path);
+	if (strcmp(req.path, "/") == 0) {
+		strcpy(path, "./static/index.html");
+	} else {
+		strcpy(path, "./static");
+		strcpy(path + 9, req.path);
+	}
+	printf("opening path: %s\n", path);
 	int f = open(path, O_RDONLY);
 	if (f == -1) {
-		const char *res = "HTTP/1.1 404 Not Found\r\n\r\n\n";
-		rc = write_res(fd, res, strlen(res));
+		rc = send_res(fd, 404, "Not Found", NULL, 0);
 		goto clean;
 	}
+	char buf[MAX_REQ_SIZE];
+	int total_read = 0;
 
-	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
-	rc = write_res(fd, res, strlen(res));
+	while (1) {
+		int n = read(f, &buf + total_read, MAX_PATH);
+		if (n == -1)
+			goto clean;
+		total_read += n;
+		if (n == 0 || total_read >= MAX_REQ_SIZE) {
+			break;
+		}
+	}
+
+	free_req(&req);
+	rc = send_res(fd, 200, "OK", buf, strlen(buf));
 	if (rc != 0) {
 		puts("unable to send resonse");
 	}
@@ -188,6 +221,9 @@ static void *handle(void *arg) {
 clean:
 	free(req_str);
 	close(fd);
+	if (f > 0) {
+		close(f);
+	}
 	// TODO: need to send a result of the handler thread
 	return NULL;
 }
