@@ -116,7 +116,8 @@ typedef struct __req_t {
 	const char *path;
 	const char *method;
 	const char *protocol;
-	const char **headers;
+	char **headers;
+	int header_count;
 } req_t;
 
 // GET / HTTP/1.1
@@ -149,6 +150,8 @@ static int parse_req(char *req_str, req_t *req) {
 	return 0;
 }
 
+static void free_req(req_t *req) { free(req->headers); }
+
 #define MAX_PATH 4096
 
 static void *handle(void *arg) {
@@ -172,6 +175,7 @@ static void *handle(void *arg) {
 	if (f == -1) {
 		const char *res = "HTTP/1.1 404 Not Found\r\n\r\n\n";
 		rc = write_res(fd, res, strlen(res));
+		goto clean;
 	}
 
 	const char *res = "HTTP/1.1 200 OK\r\n\r\nHello World!\n";
@@ -179,7 +183,7 @@ static void *handle(void *arg) {
 	if (rc != 0) {
 		puts("unable to send resonse");
 	}
-	goto clean;
+	return NULL;
 
 clean:
 	free(req_str);
