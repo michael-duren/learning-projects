@@ -71,22 +71,26 @@ int main(int argc, char *argv[]) {
 				   servinfo->ai_protocol);
 	if (s == -1) {
 		perror("socket");
+		freeaddrinfo(servinfo);
 		return 2;
 	}
 	if (bind(s, servinfo->ai_addr, servinfo->ai_addrlen) != 0) {
 		perror("bind");
+		freeaddrinfo(servinfo);
 		close(s);
 		return 2;
 	}
 
 	if (listen(s, MAX_CONN) != 0) {
 		perror("bind");
+		freeaddrinfo(servinfo);
 		close(s);
 		return 2;
 	}
 	inet_ntop(servinfo->ai_family, get_in_addr(servinfo->ai_addr), addr_str,
 			  sizeof addr_str);
 
+	freeaddrinfo(servinfo);
 	printf("listening to incoming connnections at: %s:%s\n", addr_str, port);
 	struct sockaddr_storage in_addr;
 	socklen_t in_size = sizeof(in_addr);

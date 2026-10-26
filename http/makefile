@@ -1,6 +1,7 @@
 CC=gcc
 
 run:
+	rm -r ./bin
 	mkdir -p bin
 	$(CC) -Wall -Wextra -g \
 		-fsanitize=address,undefined \

@@ -19,6 +19,7 @@
 
 static void *handle(void *arg) {
 	intptr_t fd = (intptr_t)arg;
+	int f = -1;
 	req_t req;
 	int rc = read_req(fd, &req);
 	if (rc != 0) {
@@ -28,43 +29,42 @@ static void *handle(void *arg) {
 		}
 		goto clean;
 	}
+	if (strstr(req.path, "..") != NULL) {
+		send_res(fd, 403, "Forbidden", NULL, 0);
+	}
 	char path[MAX_PATH];
 	if (strcmp(req.path, "/") == 0) {
-		strcpy(path, "./static/index.html");
+		snprintf(path, sizeof(path), "./static/index.html");
 	} else {
-		strcpy(path, "./static");
-		strcpy(path + 9, req.path);
+		snprintf(path, sizeof(path), "./static%s", req.path);
 	}
 	printf("opening path: %s\n", path);
-	int f = open(path, O_RDONLY);
+	f = open(path, O_RDONLY);
 	if (f == -1) {
+		puts("error reading path");
 		rc = send_res(fd, 404, "Not Found", NULL, 0);
 		goto clean;
 	}
 	char buf[MAX_REQ_SIZE];
 	int total_read = 0;
 
-	while (1) {
-		int n = read(f, &buf + total_read, MAX_PATH);
+	while (total_read < MAX_REQ_SIZE) {
+		int n = read(f, buf + total_read, MAX_PATH - total_read);
 		if (n == -1)
 			goto clean;
-		total_read += n;
-		if (n == 0 || total_read >= MAX_REQ_SIZE) {
+		if (n == 0)
 			break;
-		}
+		total_read += n;
 	}
 
-	free_req(&req);
 	rc = send_res(fd, 200, "OK", buf, strlen(buf));
 	if (rc != 0) {
 		puts("unable to send resonse");
 	}
-	return NULL;
-
 clean:
 	free_req(&req);
 	close(fd);
-	if (f > 0) {
+	if (f >= 0) {
 		close(f);
 	}
 	// TODO: need to send a result of the handler thread
