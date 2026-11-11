@@ -5,9 +5,9 @@ import "container/heap"
 var _ heap.Interface = (*PriorityQueue)(nil)
 
 type Item struct {
-	value    int
-	index    int
-	priority int
+	Value    int
+	Index    int
+	Priority int
 }
 
 func (pq PriorityQueue) Len() int {
@@ -15,19 +15,19 @@ func (pq PriorityQueue) Len() int {
 }
 
 func (pq PriorityQueue) Less(i, j int) bool {
-	return pq[i].priority > pq[j].priority
+	return pq[i].Priority > pq[j].Priority
 }
 
 func (pq PriorityQueue) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].index = i
-	pq[j].index = j
+	pq[i].Index = i
+	pq[j].Index = j
 }
 
 func (pq *PriorityQueue) Push(x any) {
 	n := len(*pq)
 	item := x.(*Item)
-	item.index = n
+	item.Index = n
 	(*pq) = append(*pq, item)
 }
 
@@ -36,7 +36,7 @@ func (pq *PriorityQueue) Pop() any {
 	n := len(old)
 	item := old[n-1]
 	old[n-1] = nil
-	item.index = -1
+	item.Index = -1
 	*pq = old[0 : n-1]
 	return item
 }
